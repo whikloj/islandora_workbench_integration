@@ -79,12 +79,6 @@ class EntityFieldAccessTest extends BrowserTestBase {
   protected function setUp(): void {
     parent::setUp();
 
-    // Clear plugin cache to ensure our custom Views plugin is discovered.
-    \Drupal::service('plugin.manager.views.access')->clearCachedDefinitions();
-
-    // Rebuild the container to ensure all services are properly loaded.
-    $this->rebuildContainer();
-
     // Create a role with workbench permission.
     $workbench_role = Role::create([
       'id' => 'workbench_user',
