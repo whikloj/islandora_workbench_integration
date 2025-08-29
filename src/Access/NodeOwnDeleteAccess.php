@@ -43,9 +43,6 @@ class NodeOwnDeleteAccess implements AccessInterface {
    *   The access result.
    */
   public function access(Request $request, AccountInterface $account) {
-    $this->logger->info('Checking access for node deletion by user: @user', [
-      '@user' => $account->getAccountName(),
-    ]);
     $node = $request->attributes->get('node');
 
     if (!$node instanceof NodeInterface) {
@@ -62,6 +59,10 @@ class NodeOwnDeleteAccess implements AccessInterface {
       $account->hasPermission("delete own {$node->bundle()} content") &&
       $account->id() == $node->getOwnerId()
     ) {
+      $this->logger->debug("Allowing node delete access for workbench user @user on own node @node", [
+        '@user' => $account->id(),
+        '@node' => $node->id(),
+      ]);
       return AccessResult::allowed();
     }
 

@@ -45,9 +45,6 @@ class MediaViewAccess implements AccessInterface {
    *   Access result.
    */
   public function access(Request $request, AccountInterface $account) {
-    $this->logger->info('Checking access for media types by user: @user', [
-      '@user' => $account->getAccountName(),
-    ]);
     $media = $request->attributes->get('media');
 
     if (!$media) {
@@ -62,6 +59,7 @@ class MediaViewAccess implements AccessInterface {
 
     if ($account->hasPermission('administer media types') ||
         $account->hasPermission('use islandora workbench')) {
+      $this->logger->debug("Allowing media view access for workbench user @user", ['@user' => $account->id()]);
       return AccessResult::allowed();
     }
 
