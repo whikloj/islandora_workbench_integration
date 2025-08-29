@@ -100,11 +100,12 @@ function islandora_workbench_integration_entity_field_access($operation, $field_
       $directory = $field_settings['file_directory'] ?? '';
 
       $upload_location = $scheme . '://' . $directory;
-
+      $is_dir = is_dir(\Drupal::service('file_system')->realpath($upload_location)) ? 'yes' : 'no';
+      error_log("Workbench upload location: $upload_location, Directory exists: $is_dir");
       \Drupal::logger('logger.channel.islandora_workbench_integration')->debug(
         'Upload location: @location, Directory exists: @exists', [
           '@location' => $upload_location,
-          '@exists' => is_dir(\Drupal::service('file_system')->realpath($upload_location)) ? 'yes' : 'no',
+          '@exists' => $is_dir,
         ]
       );
       // Explicitly allow, and set cacheability so this is permission-based.
