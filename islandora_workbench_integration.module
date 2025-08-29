@@ -61,12 +61,12 @@ function islandora_workbench_integration_media_presave(EntityInterface $media) {
  * Content: Administer fields permission.
  */
 function islandora_workbench_integration_entity_field_access($operation, $field_definition, $account, $items = NULL) {
-  // We only care about the 'edit' operation to file or media entities.
-  if ($operation !== 'edit' || !in_array($field_definition->getTargetEntityTypeId(), ['file', 'media'])) {
-    return AccessResult::neutral();
-  }
-
   try {
+    // We only care about the 'edit' operation to file or media entities.
+    if ($operation !== 'edit' || !in_array($field_definition->getTargetEntityTypeId(), ['file', 'media'])) {
+      return AccessResult::neutral();
+    }
+
     $route_match = \Drupal::service('current_route_match');
     $route_name = $route_match->getRouteName();
 
