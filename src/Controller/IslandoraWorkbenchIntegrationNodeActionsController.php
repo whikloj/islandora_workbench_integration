@@ -4,6 +4,7 @@ namespace Drupal\islandora_workbench_integration\Controller;
 
 use Drupal\Component\Plugin\Exception\InvalidPluginDefinitionException;
 use Drupal\Component\Plugin\Exception\PluginNotFoundException;
+use Drupal\Core\Cache\CacheableJsonResponse;
 use Drupal\Core\Controller\ControllerBase;
 use Drupal\Core\Entity\EntityTypeBundleInfoInterface;
 use Psr\Log\LoggerInterface;
@@ -34,16 +35,26 @@ class IslandoraWorkbenchIntegrationNodeActionsController extends ControllerBase 
   private EntityTypeBundleInfoInterface $entityTypeBundleInfo;
 
   /**
+   * The entity field manager service.
+   *
+   * @var \Drupal\Core\Entity\EntityFieldManagerInterface
+   */
+  private EntityFieldManagerInterface $entityFieldManager;
+
+  /**
    * Constructs the controller.
    *
    * @param \Drupal\Core\Entity\EntityTypeBundleInfoInterface $entity_type_bundle_info
    *   The entity type bundle info service.
    * @param \Psr\Log\LoggerInterface $logger
    *   The logger service.
+   * @param \Drupal\Core\Entity\EntityFieldManagerInterface $entity_field_manager
+   *   The entity field manager service.
    */
-  public function __construct(EntityTypeBundleInfoInterface $entity_type_bundle_info, LoggerInterface $logger) {
+  public function __construct(EntityTypeBundleInfoInterface $entity_type_bundle_info, LoggerInterface $logger, EntityFieldManagerInterface $entity_field_manager) {
     $this->logger = $logger;
     $this->entityTypeBundleInfo = $entity_type_bundle_info;
+    $this->entityFieldManager = $entity_field_manager;
   }
 
   /**
@@ -187,6 +198,62 @@ class IslandoraWorkbenchIntegrationNodeActionsController extends ControllerBase 
         '@message' => $e->getMessage(),
       ]);
       return new JsonResponse(['error' => 'Error loading field storage configuration.'], 500);
+    }
+  }
+
+  /**
+   * Request handler for all field configs and storage configs for a given entity type and bundle.
+   *
+   * @param string $entity_type
+   *   The entity type.
+   * @param string $bundle
+   *   The bundle name.
+   *
+   * @return \Symfony\Component\HttpFoundation\JsonResponse
+   *   JSON response with field storage config or field config or error.
+   */
+  public function entityFieldBundle(string $entity_type, string $bundle): JsonResponse {
+    try {
+      $field_configs = [];
+      $field_storage_configs = [];
+
+      $field_definitions = $this->entityFieldManager
+        ->getFieldDefinitions($entity_type, $bundle);
+      $cacheable_response = new CacheableJsonResponse();
+      foreach ($field_definitions as $field_name => $definition) {
+        if ($definition->getFieldStorageDefinition()) {
+          $bundle_config = $definition->getConfig($bundle);
+          if (!$bundle_config) {
+            return JsonResponse(['error' => "Field config for field $field_name does not exist for bundle $bundle."]);
+          }
+          else {
+            $cacheable_response->addCacheableDependency($bundle_config);
+          }
+          $field_configs[$field_name] = $bundle_config->toArray();
+          unset($field_configs[$field_name]['uuid'], $field_configs[$field_name]['_core']);
+          $field_storage = $definition->getFieldStorageDefinition();
+          if (!$field_storage) {
+            return JsonResponse(['error' => "Field storage config for field $field_name does not exist."]);
+          }
+          else {
+            $cacheable_response->addCacheableDependency($field_storage);
+          }
+          $field_storage_configs[$field_name] = $field_storage->toArray();
+          unset($field_storage_configs[$field_name]['uuid'], $field_storage_configs[$field_name]['_core']);
+        }
+      }
+
+      $cacheable_response->setData([
+        'field_config' => $field_configs,
+        'field_storage_config' => $field_storage_configs,
+      ]);
+      return $cacheable_response;
+    }
+    catch (InvalidPluginDefinitionException | PluginNotFoundException $e) {
+      $this->logger->error("Error loading field bundle config: @message", [
+        '@message' => $e->getMessage(),
+      ]);
+      return new JsonResponse(['error' => 'Error loading field bundle configuration.'], 500);
     }
   }
 
