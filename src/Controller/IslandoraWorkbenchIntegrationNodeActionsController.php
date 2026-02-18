@@ -6,7 +6,11 @@ use Drupal\Component\Plugin\Exception\InvalidPluginDefinitionException;
 use Drupal\Component\Plugin\Exception\PluginNotFoundException;
 use Drupal\Core\Cache\CacheableJsonResponse;
 use Drupal\Core\Controller\ControllerBase;
+use Drupal\Core\Entity\EntityFieldManagerInterface;
+use Drupal\Core\Entity\EntityInterface;
 use Drupal\Core\Entity\EntityTypeBundleInfoInterface;
+use Drupal\Core\Field\FieldTypePluginManagerInterface;
+use Drupal\field\Entity\FieldConfig;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\DependencyInjection\ContainerInterface;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -42,6 +46,13 @@ class IslandoraWorkbenchIntegrationNodeActionsController extends ControllerBase 
   private EntityFieldManagerInterface $entityFieldManager;
 
   /**
+   * The field type plugin manager service.
+   *
+   * @var \Drupal\Core\Field\FieldTypePluginManagerInterface
+   */
+  private FieldTypePluginManagerInterface $pluginManager;
+
+  /**
    * Constructs the controller.
    *
    * @param \Drupal\Core\Entity\EntityTypeBundleInfoInterface $entity_type_bundle_info
@@ -51,10 +62,11 @@ class IslandoraWorkbenchIntegrationNodeActionsController extends ControllerBase 
    * @param \Drupal\Core\Entity\EntityFieldManagerInterface $entity_field_manager
    *   The entity field manager service.
    */
-  public function __construct(EntityTypeBundleInfoInterface $entity_type_bundle_info, LoggerInterface $logger, EntityFieldManagerInterface $entity_field_manager) {
+  public function __construct(EntityTypeBundleInfoInterface $entity_type_bundle_info, LoggerInterface $logger, EntityFieldManagerInterface $entity_field_manager, FieldTypePluginManagerInterface $plugin_manager) {
     $this->logger = $logger;
     $this->entityTypeBundleInfo = $entity_type_bundle_info;
     $this->entityFieldManager = $entity_field_manager;
+    $this->pluginManager = $plugin_manager;
   }
 
   /**
@@ -69,7 +81,9 @@ class IslandoraWorkbenchIntegrationNodeActionsController extends ControllerBase 
   public static function create(ContainerInterface $container) {
     return new static(
       $container->get('entity_type.bundle.info'),
-      $container->get('logger.channel.islandora_workbench_integration')
+      $container->get('logger.channel.islandora_workbench_integration'),
+      $container->get('entity_field.manager'),
+      $container->get('plugin.manager.field.field_type')
     );
   }
 
@@ -203,6 +217,7 @@ class IslandoraWorkbenchIntegrationNodeActionsController extends ControllerBase 
 
   /**
    * Request handler for all field configs and storage configs for a given entity type and bundle.
+   * Simulates the combined output of multiple calls to the above endpoints.
    *
    * @param string $entity_type
    *   The entity type.
@@ -210,43 +225,103 @@ class IslandoraWorkbenchIntegrationNodeActionsController extends ControllerBase 
    *   The bundle name.
    *
    * @return \Symfony\Component\HttpFoundation\JsonResponse
-   *   JSON response with field storage config or field config or error.
+   *   JSON response with field storage config and field config or error.
    */
   public function entityFieldBundle(string $entity_type, string $bundle): JsonResponse {
     try {
-      $field_configs = [];
-      $field_storage_configs = [];
-
       $field_definitions = $this->entityFieldManager
         ->getFieldDefinitions($entity_type, $bundle);
       $cacheable_response = new CacheableJsonResponse();
+
+      # All the field config IDs and field storage config IDs for the fields on this entity type and bundle.
+      $field_config_ids = [];
+      $field_storage_ids = [];
+      $base_fields = [];
+
       foreach ($field_definitions as $field_name => $definition) {
-        if ($definition->getFieldStorageDefinition()) {
-          $bundle_config = $definition->getConfig($bundle);
-          if (!$bundle_config) {
-            return JsonResponse(['error' => "Field config for field $field_name does not exist for bundle $bundle."]);
-          }
-          else {
-            $cacheable_response->addCacheableDependency($bundle_config);
-          }
-          $field_configs[$field_name] = $bundle_config->toArray();
-          unset($field_configs[$field_name]['uuid'], $field_configs[$field_name]['_core']);
-          $field_storage = $definition->getFieldStorageDefinition();
-          if (!$field_storage) {
-            return JsonResponse(['error' => "Field storage config for field $field_name does not exist."]);
-          }
-          else {
-            $cacheable_response->addCacheableDependency($field_storage);
-          }
-          $field_storage_configs[$field_name] = $field_storage->toArray();
-          unset($field_storage_configs[$field_name]['uuid'], $field_storage_configs[$field_name]['_core']);
+        // Check if this is a configurable field
+        if ($definition instanceof FieldConfig) {
+          $field_config_ids[] = "{$entity_type}.{$bundle}.{$field_name}";
+          $field_storage_ids[] = "{$entity_type}.{$field_name}";
+        }
+        else {
+          // It is a base field.
+          $base_fields[$field_name] = $definition;
         }
       }
 
-      $cacheable_response->setData([
-        'field_config' => $field_configs,
-        'field_storage_config' => $field_storage_configs,
-      ]);
+      // This will store all the field's information.
+      $field_info = [];
+
+      if (!empty($field_config_ids)) {
+        $loaded_field_configs = $this->entityTypeManager()
+          ->getStorage('field_config')
+          ->loadMultiple($field_config_ids);
+
+
+        foreach ($loaded_field_configs as $config_id => $field_config) {
+          $cacheable_response->addCacheableDependency($field_config);
+          $field_name = $field_config->getName();
+          if (!isset($field_info[$field_name])) {
+            $field_info[$field_name] = [];
+          }
+          $field_info[$field_name]['config'] = $this->cleanConfigData($field_config);
+        }
+      }
+
+      // Load all field storage configs in one query
+      if (!empty($field_storage_ids)) {
+        $loaded_storage_configs = $this->entityTypeManager()
+          ->getStorage('field_storage_config')
+          ->loadMultiple($field_storage_ids);
+
+        foreach ($loaded_storage_configs as $storage_id => $storage_config) {
+          $cacheable_response->addCacheableDependency($storage_config);
+          $field_name = $storage_config->getName();
+          if (!isset($field_info[$field_name])) {
+            $field_info[$field_name] = [];
+          }
+          $field_info[$field_name]['storage_config'] = $this->cleanConfigData($storage_config);
+        }
+      }
+
+      // Add base field information
+      foreach ($base_fields as $field_name => $definition) {
+        $field_info[$field_name]['config'] = [
+          'field_name' => $field_name,
+          'entity_type' => $entity_type,
+          'bundle' => $bundle,
+          'label' => (string) $definition->getLabel(),
+          'description' => (string) $definition->getDescription(),
+          'required' => $definition->isRequired(),
+          'translatable' => $definition->isTranslatable(),
+          'default_value' => $definition->getDefaultValueLiteral(),
+          'default_value_callback' => $definition->getDefaultValueCallback(),
+          'settings' => $definition->getSettings(),
+          'field_type' => $definition->getType(),
+          'is_base_field' => TRUE,
+        ];
+
+        // Get storage definition for base field
+        $field_storage = $definition->getFieldStorageDefinition();
+        if ($field_storage) {
+          $base_definition = $this->pluginManager->getDefinition($field_storage->getType());
+          $field_info[$field_name]['storage_config'] = [
+            'field_name' => $field_name,
+            'entity_type' => $entity_type,
+            'type' => $field_storage->getType(),
+            'settings' => $field_storage->getSettings(),
+            'module' => $base_definition['provider'] ?? 'core',
+            'cardinality' => $field_storage->getCardinality(),
+            'translatable' => $field_storage->isTranslatable(),
+            'locked' => TRUE,
+            'custom_storage' => $field_storage->hasCustomStorage(),
+            'is_base_field' => TRUE,
+          ];
+        }
+      }
+
+      $cacheable_response->setData($field_info);
       return $cacheable_response;
     }
     catch (InvalidPluginDefinitionException | PluginNotFoundException $e) {
@@ -255,6 +330,26 @@ class IslandoraWorkbenchIntegrationNodeActionsController extends ControllerBase 
       ]);
       return new JsonResponse(['error' => 'Error loading field bundle configuration.'], 500);
     }
+    catch (\Exception $e) {
+      $this->logger->error("Unexpected error in entityFieldBundle: @message", [
+        '@message' => $e->getMessage(),
+      ]);
+      return new JsonResponse(['error' => 'Unexpected error loading field configuration.'], 500);
+    }
+  }
+
+  /**
+   * Filter some unnecessary keys from the config data to reduce response size and remove irrelevant information.
+   * @param EntityInterface $config_data
+   *   The field config or field storage config entity to clean.
+   * @return array
+   *   The cleaned config data as an array.
+   */
+  private function cleanConfigData(EntityInterface $config_data): array {
+    $data = $config_data->toArray();
+    unset($data['uuid'], $data['_core']);
+    $data['is_base_field'] = FALSE;
+    return $data;
   }
 
 }
