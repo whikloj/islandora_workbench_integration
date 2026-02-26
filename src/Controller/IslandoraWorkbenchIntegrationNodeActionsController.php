@@ -233,6 +233,12 @@ class IslandoraWorkbenchIntegrationNodeActionsController extends ControllerBase 
         ->getFieldDefinitions($entity_type, $bundle);
       $cacheable_response = new CacheableJsonResponse();
 
+      // Add cache tags to invalidate when fields are added or deleted.
+      $cacheable_response->getCacheableMetadata()->addCacheTags([
+        'config:field.field.' . $entity_type . '.' . $bundle,
+        'config:field.storage.' . $entity_type,
+      ]);
+
       # All the field config IDs and field storage config IDs for the fields on this entity type and bundle.
       $field_config_ids = [];
       $field_storage_ids = [];
