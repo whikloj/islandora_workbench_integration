@@ -102,3 +102,17 @@ islandora_workbench_integration.node_actions_entity_field_bundle:
             type: string
         bundle:
             type: string
+
+islandora_workbench_integration.media_actions_entity_type:
+  path: '/islandora_workbench_integration/media_actions/entity_type/{entity_type}'
+  defaults:
+    _controller: '\Drupal\islandora_workbench_integration\Controller\MediaActionsController::getMediaType'
+  methods:
+    - 'GET'
+  requirements:
+    _permission: 'administer media types+use islandora workbench'
+  options:
+    _auth: ['basic_auth','jwt_auth','cookie']
+    parameters:
+      entity_type:
+        type: string
