@@ -22,7 +22,8 @@ class MediaActionsControllerTest extends BrowserTestBase {
    * {@inheritdoc}
    */
   protected static $modules = [
-    'node',
+    'media',
+    'file',
     'field',
     'text',
     'system',

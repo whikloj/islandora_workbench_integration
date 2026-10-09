@@ -232,7 +232,7 @@ class IslandoraWorkbenchIntegrationNodeActionsController extends ControllerBase 
    */
   public function entityFieldBundle(string $entity_type, string $bundle): JsonResponse {
     try {
-      if (empty($this->entityTypeBundleInfo->getBundleInfo($entity_type))) {
+      if (!$this->entityTypeManager()->hasDefinition($entity_type)) {
         $this->logger->warning("Entity type @type does not exist", [
           '@type' => $entity_type,
         ]);
@@ -254,6 +254,7 @@ class IslandoraWorkbenchIntegrationNodeActionsController extends ControllerBase 
         'config:field_config_list',
         'config:field_storage_config_list',
         'entity_field_info',
+        'entity_bundles',
       ]);
 
       $field_config_ids = [];
